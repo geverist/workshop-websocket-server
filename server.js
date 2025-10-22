@@ -14,7 +14,7 @@ import { handleConversationRelay } from './conversation-handler.js';
 const PORT = process.env.PORT || 3000;
 
 // Create HTTP server
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   if (req.url === '/health' || req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
@@ -22,6 +22,23 @@ const server = http.createServer((req, res) => {
       service: 'workshop-websocket-server',
       uptime: process.uptime()
     }));
+  } else if (req.url === '/test-db') {
+    // Test database connection
+    try {
+      const testConfig = await getStudentConfig('ws_1761110889775_ve2vtj28p6');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        hasConfig: !!testConfig,
+        studentName: testConfig?.student_name || 'Not found'
+      }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: false,
+        error: error.message
+      }));
+    }
   } else {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');
