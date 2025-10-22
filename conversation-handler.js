@@ -163,6 +163,9 @@ export function handleConversationRelay(ws, studentConfig, sessionToken) {
 
           } catch (aiError) {
             console.error(`❌ ${studentConfig.student_name} - OpenAI error:`, aiError.message);
+            console.error(`   Error details:`, aiError);
+            console.error(`   API Key exists:`, !!studentConfig.openai_api_key);
+            console.error(`   API Key starts with:`, studentConfig.openai_api_key?.substring(0, 10));
 
             ws.send(JSON.stringify({
               type: 'text',
