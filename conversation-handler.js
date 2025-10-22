@@ -70,10 +70,26 @@ export function handleConversationRelay(ws, studentConfig, sessionToken) {
 
           try {
             // Call OpenAI with student's custom system prompt
+            const defaultPrompt = `You are a helpful assistant.
+
+# Voice Conversation Guidelines
+- Keep responses BRIEF (1-2 sentences max)
+- Be conversational and natural
+- Avoid lists, bullet points, or structured formatting
+- Don't say "as an AI" or mention you're artificial
+- If you don't know something, say so briefly
+- Respond quickly - every second matters in voice
+- Use casual language, contractions, and natural speech patterns
+
+# Response Style
+- Short and direct
+- Friendly but professional
+- Natural and human-like`;
+
             const messages = [
               {
                 role: 'system',
-                content: studentConfig.system_prompt || 'You are a helpful AI voice assistant.'
+                content: studentConfig.system_prompt || defaultPrompt
               },
               ...conversationHistory
             ];
