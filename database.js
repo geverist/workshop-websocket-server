@@ -41,14 +41,35 @@ export async function getStudentConfig(sessionToken) {
 
     const config = result[0];
 
-    // Parse JSON fields
+    // Parse JSON fields (handle both string and object formats)
+    let tools = [];
+    let voiceSettings = {};
+
+    try {
+      tools = typeof config.tools === 'string'
+        ? JSON.parse(config.tools)
+        : (config.tools || []);
+    } catch (e) {
+      console.error('Error parsing tools:', e);
+      tools = [];
+    }
+
+    try {
+      voiceSettings = typeof config.voice_settings === 'string'
+        ? JSON.parse(config.voice_settings)
+        : (config.voice_settings || {});
+    } catch (e) {
+      console.error('Error parsing voice_settings:', e);
+      voiceSettings = {};
+    }
+
     return {
       session_token: config.session_token,
       student_name: config.student_name,
       openai_api_key: config.openai_api_key,
       system_prompt: config.system_prompt,
-      tools: config.tools || [],
-      voice_settings: config.voice_settings || {},
+      tools: tools,
+      voice_settings: voiceSettings,
       created_at: config.created_at,
       updated_at: config.updated_at
     };
