@@ -46,16 +46,24 @@ const server = http.createServer(async (req, res) => {
 });
 
 // Create WebSocket server
+// Note: Don't specify path - accept all WebSocket connections and filter in handler
 const wss = new WebSocketServer({
-  server,
-  path: '/ws'
+  server
 });
 
 console.log('🚀 Multi-tenant WebSocket server starting...');
 
 // Handle WebSocket connections
 wss.on('connection', async (ws, req) => {
+  console.log(`📡 WebSocket connection attempt: ${req.url}`);
+
   // Extract session token from URL: /ws/student-abc123
+  if (!req.url.startsWith('/ws/')) {
+    console.error(`❌ Invalid WebSocket path: ${req.url}`);
+    ws.close(1008, 'Invalid WebSocket path - must start with /ws/');
+    return;
+  }
+
   const urlParts = req.url.split('/');
   const sessionToken = urlParts[urlParts.length - 1];
 
