@@ -97,10 +97,10 @@ wss.on('connection', async (ws, req) => {
 });
 
 // Start server
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Multi-tenant WebSocket server running on port ${PORT}`);
-  console.log(`   WebSocket endpoint: ws://localhost:${PORT}/ws/{session-token}`);
-  console.log(`   Health check: http://localhost:${PORT}/health`);
+  console.log(`   WebSocket endpoint: ws://0.0.0.0:${PORT}/ws/{session-token}`);
+  console.log(`   Health check: http://0.0.0.0:${PORT}/health`);
 });
 
 // Graceful shutdown
