@@ -1,0 +1,20 @@
+{
+  "name": "workshop-websocket-server",
+  "version": "1.0.0",
+  "description": "Multi-tenant WebSocket server for Twilio Voice AI Workshop",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "openai": "^4.73.0",
+    "postgres": "^3.4.5",
+    "dotenv": "^16.4.7"
+  }
+}
