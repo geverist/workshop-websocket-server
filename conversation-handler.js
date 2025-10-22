@@ -91,7 +91,9 @@ export function handleConversationRelay(ws, studentConfig, sessionToken) {
               completionParams.tool_choice = 'auto';
             }
 
+            console.log(`🤖 ${studentConfig.student_name} - Calling OpenAI with ${conversationHistory.length} messages...`);
             const completion = await openai.chat.completions.create(completionParams);
+            console.log(`✅ ${studentConfig.student_name} - OpenAI responded successfully`);
             const message = completion.choices[0].message;
 
             // Handle tool calls if present
