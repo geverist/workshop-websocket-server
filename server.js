@@ -76,16 +76,42 @@ wss.on('connection', async (ws, req) => {
   console.log(`📞 New connection for session: ${sessionToken.substring(0, 8)}...`);
 
   try {
-    // Load student configuration from database
-    const studentConfig = await getStudentConfig(sessionToken);
+    // Fetch student settings from Vercel API (includes decrypted OpenAI key)
+    const vercelApiUrl = process.env.VERCEL_API_URL || 'https://twilio-voice-ai-workshop-vercel.vercel.app';
+    const settingsUrl = `${vercelApiUrl}/api/get-student-ai-settings?sessionToken=${encodeURIComponent(sessionToken)}`;
 
-    if (!studentConfig) {
-      console.error(`❌ No config found for session: ${sessionToken.substring(0, 8)}...`);
+    console.log(`🔍 Fetching settings from: ${settingsUrl}`);
+    const settingsResponse = await fetch(settingsUrl);
+
+    if (!settingsResponse.ok) {
+      console.error(`❌ Failed to fetch settings: ${settingsResponse.status}`);
+      ws.close(1008, 'Failed to load student settings');
+      return;
+    }
+
+    const settingsData = await settingsResponse.json();
+
+    if (!settingsData.success || !settingsData.settings) {
+      console.error(`❌ No settings found for session: ${sessionToken.substring(0, 8)}...`);
       ws.close(1008, 'Invalid session token');
       return;
     }
 
+    // Convert Vercel API response to studentConfig format
+    const studentConfig = {
+      session_token: sessionToken,
+      student_name: settingsData.settings.studentName,
+      openai_api_key: settingsData.settings.openaiApiKey,  // Already decrypted by Vercel API
+      system_prompt: settingsData.settings.systemPrompt,
+      tools: settingsData.settings.tools ? JSON.parse(settingsData.settings.tools) : [],
+      voice_settings: {
+        voice: settingsData.settings.voice || 'alloy',
+        greeting: settingsData.settings.greeting
+      }
+    };
+
     console.log(`✅ Loaded config for student: ${studentConfig.student_name || 'Unknown'}`);
+    console.log(`   OpenAI key: ${studentConfig.openai_api_key ? '✓ Available (decrypted)' : '✗ Missing'}`);
 
     // Handle ConversationRelay protocol with student's config
     handleConversationRelay(ws, studentConfig, sessionToken);
