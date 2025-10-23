@@ -15,8 +15,16 @@ export function handleConversationRelay(ws, studentConfig, sessionToken) {
   console.log(`🎤 Starting ConversationRelay for ${studentConfig.student_name || sessionToken.substring(0, 8)}`);
 
   // Initialize OpenAI with student's API key
+  const openaiApiKey = studentConfig.openai_api_key || process.env.OPENAI_API_KEY;
+
+  if (studentConfig.openai_api_key) {
+    console.log(`   ✅ Using student's OpenAI API key`);
+  } else {
+    console.log(`   ⚠️  Using instructor's OpenAI API key (fallback)`);
+  }
+
   const openai = new OpenAI({
-    apiKey: studentConfig.openai_api_key || process.env.OPENAI_API_KEY
+    apiKey: openaiApiKey
   });
 
   // Store conversation history
