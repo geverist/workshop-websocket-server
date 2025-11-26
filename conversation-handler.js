@@ -32,19 +32,43 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
     }
   };
 
+  // Send WebSocket connection established event
+  sendTunnelEvent('websocket_connected', {
+    studentName: studentConfig.student_name,
+    hasSystemPrompt: !!studentConfig.system_prompt,
+    hasTools: !!(studentConfig.tools && studentConfig.tools.length > 0)
+  });
+
   // Initialize OpenAI with student's API key
   let openaiApiKey = studentConfig.openai_api_key;
 
   // If no key in database, try to get it through credential tunnel
   if (!openaiApiKey && requestCredentialsFn) {
     console.log(`   🔑 No stored key - requesting through credential tunnel...`);
+
+    // Send credential request event
+    sendTunnelEvent('credential_request_sent', {
+      reason: 'No OpenAI key in database'
+    });
+
     try {
       openaiApiKey = await requestCredentialsFn(sessionToken);
       if (openaiApiKey) {
         console.log(`   ✅ Using student's OpenAI API key (from tunnel)`);
+
+        // Send credential received event
+        sendTunnelEvent('credential_received', {
+          keyType: 'openai',
+          source: 'tunnel'
+        });
       }
     } catch (error) {
       console.log(`   ⚠️  Tunnel request failed: ${error.message}`);
+
+      // Send credential request failed event
+      sendTunnelEvent('credential_request_failed', {
+        error: error.message
+      });
     }
   }
 
@@ -165,8 +189,23 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
             }
 
             console.log(`🤖 ${studentConfig.student_name} - Calling OpenAI with ${conversationHistory.length} messages...`);
+
+            // Send OpenAI request start event
+            sendTunnelEvent('openai_request_start', {
+              messageCount: conversationHistory.length,
+              model: 'gpt-4o-mini',
+              hasTools: !!(studentConfig.tools && studentConfig.tools.length > 0)
+            });
+
             const completion = await openai.chat.completions.create(completionParams);
             console.log(`✅ ${studentConfig.student_name} - OpenAI responded successfully`);
+
+            // Send OpenAI request complete event
+            sendTunnelEvent('openai_request_complete', {
+              success: true,
+              finishReason: completion.choices[0].finish_reason
+            });
+
             const message = completion.choices[0].message;
 
             // Send token usage to browser
@@ -319,6 +358,11 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
 
         default:
           console.log(`❓ ${studentConfig.student_name} - Unknown event: ${data.type}`);
+          // Send ALL unknown events to browser for debugging/filtering
+          sendTunnelEvent('unknown_event', {
+            originalType: data.type,
+            rawData: data
+          });
       }
 
     } catch (error) {
