@@ -53,14 +53,21 @@ const wss = new WebSocketServer({
 
 console.log('🚀 Multi-tenant WebSocket server starting...');
 
+// Store active credential tunnels (browser connections)
+// Key: sessionToken, Value: WebSocket
+const activeTunnels = new Map();
+
 // Handle WebSocket connections
 wss.on('connection', async (ws, req) => {
   console.log(`📡 WebSocket connection attempt: ${req.url}`);
 
-  // Extract session token from URL: /ws/student-abc123
-  if (!req.url.startsWith('/ws/')) {
+  // Determine connection type: /ws/ = Twilio, /tunnel/ = Browser
+  const isTunnelConnection = req.url.startsWith('/tunnel/');
+  const isCallConnection = req.url.startsWith('/ws/');
+
+  if (!isTunnelConnection && !isCallConnection) {
     console.error(`❌ Invalid WebSocket path: ${req.url}`);
-    ws.close(1008, 'Invalid WebSocket path - must start with /ws/');
+    ws.close(1008, 'Invalid WebSocket path - must start with /ws/ or /tunnel/');
     return;
   }
 
@@ -70,13 +77,47 @@ wss.on('connection', async (ws, req) => {
   // Strip query parameters from session token (e.g., ?encryptedKey=...)
   const sessionToken = lastPart.split('?')[0];
 
-  if (!sessionToken || sessionToken === 'ws') {
+  if (!sessionToken || sessionToken === 'ws' || sessionToken === 'tunnel') {
     console.error('❌ No session token provided in URL');
     ws.close(1008, 'Session token required');
     return;
   }
 
-  console.log(`📞 New connection for session: ${sessionToken.substring(0, 8)}...`);
+  // Handle browser credential tunnel connection
+  if (isTunnelConnection) {
+    console.log(`🔐 Browser tunnel connected for session: ${sessionToken.substring(0, 8)}...`);
+    activeTunnels.set(sessionToken, ws);
+
+    // Send confirmation
+    ws.send(JSON.stringify({
+      type: 'tunnel_connected',
+      sessionToken: sessionToken.substring(0, 20) + '...'
+    }));
+
+    // Handle tunnel disconnection
+    ws.on('close', () => {
+      console.log(`🔐 Browser tunnel disconnected: ${sessionToken.substring(0, 8)}...`);
+      activeTunnels.delete(sessionToken);
+    });
+
+    // Handle credential responses from browser
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message);
+        if (data.type === 'credential_response') {
+          console.log(`🔑 Received credentials from browser for session: ${sessionToken.substring(0, 8)}...`);
+          // Credentials are handled by pending promise in handleConversationRelay
+        }
+      } catch (error) {
+        console.error('❌ Error parsing tunnel message:', error);
+      }
+    });
+
+    return; // Don't proceed to ConversationRelay handler
+  }
+
+  // Handle Twilio ConversationRelay connection
+  console.log(`📞 Twilio connection for session: ${sessionToken.substring(0, 8)}...`);
 
   try {
     // Fetch student settings from Vercel API (includes decrypted OpenAI key)
@@ -117,7 +158,8 @@ wss.on('connection', async (ws, req) => {
     console.log(`   OpenAI key: ${studentConfig.openai_api_key ? '✓ Available (decrypted)' : '✗ Missing'}`);
 
     // Handle ConversationRelay protocol with student's config
-    handleConversationRelay(ws, studentConfig, sessionToken);
+    // Pass credential tunnel function for real-time key retrieval
+    await handleConversationRelay(ws, studentConfig, sessionToken, requestCredentialsThroughTunnel);
 
   } catch (error) {
     console.error('❌ Error loading student config:', error);
@@ -125,10 +167,56 @@ wss.on('connection', async (ws, req) => {
   }
 });
 
+/**
+ * Request OpenAI API key through secure credential tunnel
+ * @param {string} sessionToken - Student's session token
+ * @returns {Promise<string|null>} OpenAI API key or null if tunnel not available
+ */
+export async function requestCredentialsThroughTunnel(sessionToken) {
+  const tunnelWs = activeTunnels.get(sessionToken);
+
+  if (!tunnelWs || tunnelWs.readyState !== 1) { // 1 = OPEN
+    console.log(`⚠️  No active tunnel for session: ${sessionToken.substring(0, 8)}...`);
+    return null;
+  }
+
+  return new Promise((resolve, reject) => {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const timeout = setTimeout(() => {
+      tunnelWs.removeEventListener('message', messageHandler);
+      reject(new Error('Credential request timeout - browser may be closed'));
+    }, 10000); // 10 second timeout
+
+    const messageHandler = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'credential_response' && data.requestId === requestId) {
+          clearTimeout(timeout);
+          tunnelWs.removeEventListener('message', messageHandler);
+          console.log(`✅ Received OpenAI key from browser tunnel`);
+          resolve(data.openaiApiKey);
+        }
+      } catch (error) {
+        // Ignore parse errors
+      }
+    };
+
+    tunnelWs.addEventListener('message', messageHandler);
+
+    // Send credential request to browser
+    console.log(`🔑 Requesting credentials through tunnel for session: ${sessionToken.substring(0, 8)}...`);
+    tunnelWs.send(JSON.stringify({
+      type: 'credential_request',
+      requestId: requestId
+    }));
+  });
+}
+
 // Start server
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Multi-tenant WebSocket server running on port ${PORT}`);
   console.log(`   WebSocket endpoint: ws://0.0.0.0:${PORT}/ws/{session-token}`);
+  console.log(`   Credential tunnel: ws://0.0.0.0:${PORT}/tunnel/{session-token}`);
   console.log(`   Health check: http://0.0.0.0:${PORT}/health`);
 });
 

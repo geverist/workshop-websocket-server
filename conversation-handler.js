@@ -10,17 +10,33 @@ import OpenAI from 'openai';
  * @param {WebSocket} ws - WebSocket connection from Twilio
  * @param {Object} studentConfig - Student's configuration from database
  * @param {string} sessionToken - Student's session token
+ * @param {Function} requestCredentialsFn - Function to request credentials through tunnel
  */
-export function handleConversationRelay(ws, studentConfig, sessionToken) {
+export async function handleConversationRelay(ws, studentConfig, sessionToken, requestCredentialsFn) {
   console.log(`🎤 Starting ConversationRelay for ${studentConfig.student_name || sessionToken.substring(0, 8)}`);
 
   // Initialize OpenAI with student's API key
-  const openaiApiKey = studentConfig.openai_api_key || process.env.OPENAI_API_KEY;
+  let openaiApiKey = studentConfig.openai_api_key;
 
-  if (studentConfig.openai_api_key) {
-    console.log(`   ✅ Using student's OpenAI API key`);
-  } else {
+  // If no key in database, try to get it through credential tunnel
+  if (!openaiApiKey && requestCredentialsFn) {
+    console.log(`   🔑 No stored key - requesting through credential tunnel...`);
+    try {
+      openaiApiKey = await requestCredentialsFn(sessionToken);
+      if (openaiApiKey) {
+        console.log(`   ✅ Using student's OpenAI API key (from tunnel)`);
+      }
+    } catch (error) {
+      console.log(`   ⚠️  Tunnel request failed: ${error.message}`);
+    }
+  }
+
+  // Fall back to instructor's key if tunnel unavailable
+  if (!openaiApiKey) {
+    openaiApiKey = process.env.OPENAI_API_KEY;
     console.log(`   ⚠️  Using instructor's OpenAI API key (fallback)`);
+  } else if (studentConfig.openai_api_key) {
+    console.log(`   ✅ Using student's OpenAI API key (from database)`);
   }
 
   const openai = new OpenAI({
