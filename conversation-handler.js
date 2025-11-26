@@ -11,9 +11,26 @@ import OpenAI from 'openai';
  * @param {Object} studentConfig - Student's configuration from database
  * @param {string} sessionToken - Student's session token
  * @param {Function} requestCredentialsFn - Function to request credentials through tunnel
+ * @param {Map} activeTunnels - Map of active browser tunnel connections
  */
-export async function handleConversationRelay(ws, studentConfig, sessionToken, requestCredentialsFn) {
+export async function handleConversationRelay(ws, studentConfig, sessionToken, requestCredentialsFn, activeTunnels) {
   console.log(`🎤 Starting ConversationRelay for ${studentConfig.student_name || sessionToken.substring(0, 8)}`);
+
+  // Helper function to send events to browser through tunnel
+  const sendTunnelEvent = (eventType, data) => {
+    const tunnelWs = activeTunnels?.get(sessionToken);
+    if (tunnelWs && tunnelWs.readyState === 1) { // 1 = OPEN
+      try {
+        tunnelWs.send(JSON.stringify({
+          type: eventType,
+          timestamp: new Date().toISOString(),
+          ...data
+        }));
+      } catch (error) {
+        console.error(`Failed to send tunnel event ${eventType}:`, error.message);
+      }
+    }
+  };
 
   // Initialize OpenAI with student's API key
   let openaiApiKey = studentConfig.openai_api_key;
@@ -78,6 +95,16 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
           callMetadata.to = data.to;
           callMetadata.direction = data.direction;
           callMetadata.sessionId = data.sessionId;
+
+          // Send to browser
+          sendTunnelEvent('call_setup', {
+            callSid: data.callSid,
+            sessionId: data.sessionId,
+            from: data.from,
+            to: data.to,
+            direction: data.direction,
+            studentName: studentConfig.student_name
+          });
           break;
 
         // ----------------------------------------------------------------------
@@ -86,13 +113,19 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
         case 'prompt':
           console.log(`🗣️  ${studentConfig.student_name} - Caller said: ${data.voicePrompt}`);
 
+          // Send to browser
+          sendTunnelEvent('user_spoke', {
+            transcript: data.voicePrompt,
+            callSid: callMetadata.callSid
+          });
+
           // Add to conversation history
           conversationHistory.push({
             role: 'user',
             content: data.voicePrompt
           });
 
-          try {
+          try{
             // Call OpenAI with student's custom system prompt
             const defaultPrompt = `You are a helpful assistant.
 
@@ -136,10 +169,27 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
             console.log(`✅ ${studentConfig.student_name} - OpenAI responded successfully`);
             const message = completion.choices[0].message;
 
+            // Send token usage to browser
+            sendTunnelEvent('token_usage', {
+              promptTokens: completion.usage.prompt_tokens,
+              completionTokens: completion.usage.completion_tokens,
+              totalTokens: completion.usage.total_tokens,
+              estimatedCost: (completion.usage.total_tokens * 0.000015).toFixed(6) // Rough GPT-4o-mini cost
+            });
+
             // Handle tool calls if present
             if (message.tool_calls) {
               console.log(`🔧 ${studentConfig.student_name} - AI wants to call tools:`,
                 message.tool_calls.map(t => t.function.name));
+
+              // Send tool call event to browser
+              for (const toolCall of message.tool_calls) {
+                sendTunnelEvent('tool_call_start', {
+                  toolName: toolCall.function.name,
+                  arguments: toolCall.function.arguments,
+                  toolCallId: toolCall.id
+                });
+              }
 
               // Add assistant message with tool calls to history
               conversationHistory.push(message);
@@ -151,6 +201,13 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
                   JSON.parse(toolCall.function.arguments),
                   studentConfig
                 );
+
+                // Send tool result to browser
+                sendTunnelEvent('tool_call_result', {
+                  toolName: toolCall.function.name,
+                  toolCallId: toolCall.id,
+                  result: toolResult
+                });
 
                 conversationHistory.push({
                   role: 'tool',
@@ -178,6 +235,13 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
                 content: aiResponse
               });
 
+              // Send AI response to browser
+              sendTunnelEvent('ai_response', {
+                text: aiResponse,
+                afterTools: true,
+                tokensUsed: finalCompletion.usage?.total_tokens || 0
+              });
+
               // Send response to Twilio
               ws.send(JSON.stringify({
                 type: 'text',
@@ -195,6 +259,12 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
                 content: aiResponse
               });
 
+              // Send AI response to browser
+              sendTunnelEvent('ai_response', {
+                text: aiResponse,
+                tokensUsed: completion.usage?.total_tokens || 0
+              });
+
               // Send response to Twilio
               ws.send(JSON.stringify({
                 type: 'text',
@@ -209,6 +279,12 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
             console.error(`   API Key exists:`, !!studentConfig.openai_api_key);
             console.error(`   API Key starts with:`, studentConfig.openai_api_key?.substring(0, 10));
 
+            // Send error to browser
+            sendTunnelEvent('error', {
+              message: aiError.message,
+              type: 'openai_error'
+            });
+
             ws.send(JSON.stringify({
               type: 'text',
               token: 'I apologize, I encountered an error processing your request.',
@@ -222,7 +298,11 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
         // ----------------------------------------------------------------------
         case 'dtmf':
           console.log(`🔢 ${studentConfig.student_name} - DTMF: ${data.digit}`);
-          // Student can configure DTMF handling in their tools
+
+          // Send to browser
+          sendTunnelEvent('dtmf_pressed', {
+            digit: data.digit
+          });
           break;
 
         // ----------------------------------------------------------------------
@@ -230,6 +310,11 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
         // ----------------------------------------------------------------------
         case 'interrupt':
           console.log(`⚠️  ${studentConfig.student_name} - Interrupted at: ${data.utteranceUntilInterrupt}`);
+
+          // Send to browser
+          sendTunnelEvent('interrupted', {
+            utteranceUntilInterrupt: data.utteranceUntilInterrupt
+          });
           break;
 
         default:
@@ -243,13 +328,28 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
 
   // Handle connection close
   ws.on('close', () => {
+    const duration = Math.round((Date.now() - new Date(callMetadata.startTime)) / 1000);
     console.log(`📞 ${studentConfig.student_name} - ConversationRelay disconnected`);
-    console.log(`   Call duration: ${Math.round((Date.now() - new Date(callMetadata.startTime)) / 1000)}s`);
+    console.log(`   Call duration: ${duration}s`);
+
+    // Send call ended event to browser
+    sendTunnelEvent('call_ended', {
+      callSid: callMetadata.callSid,
+      duration: duration,
+      from: callMetadata.from,
+      to: callMetadata.to
+    });
   });
 
   // Handle errors
   ws.on('error', (error) => {
     console.error(`❌ ${studentConfig.student_name} - WebSocket error:`, error.message);
+
+    // Send error to browser
+    sendTunnelEvent('error', {
+      message: error.message,
+      type: 'websocket_error'
+    });
   });
 }
 

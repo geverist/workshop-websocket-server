@@ -159,7 +159,8 @@ wss.on('connection', async (ws, req) => {
 
     // Handle ConversationRelay protocol with student's config
     // Pass credential tunnel function for real-time key retrieval
-    await handleConversationRelay(ws, studentConfig, sessionToken, requestCredentialsThroughTunnel);
+    // Pass activeTunnels map for streaming events to browser
+    await handleConversationRelay(ws, studentConfig, sessionToken, requestCredentialsThroughTunnel, activeTunnels);
 
   } catch (error) {
     console.error('❌ Error loading student config:', error);
