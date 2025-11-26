@@ -129,6 +129,25 @@ export async function handleConversationRelay(ws, studentConfig, sessionToken, r
             direction: data.direction,
             studentName: studentConfig.student_name
           });
+
+          // If there's a custom welcome greeting, send it as initial AI response
+          // This ensures the greeting appears in transcripts/call monitor
+          if (studentConfig.custom_welcome_greeting) {
+            console.log(`👋 ${studentConfig.student_name} - AI greeting: ${studentConfig.custom_welcome_greeting}`);
+
+            // Add to conversation history
+            conversationHistory.push({
+              role: 'assistant',
+              content: studentConfig.custom_welcome_greeting
+            });
+
+            // Send AI response to browser
+            sendTunnelEvent('ai_response', {
+              text: studentConfig.custom_welcome_greeting,
+              isInitialGreeting: true,
+              tokensUsed: 0
+            });
+          }
           break;
 
         // ----------------------------------------------------------------------
