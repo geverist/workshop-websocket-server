@@ -65,7 +65,10 @@ wss.on('connection', async (ws, req) => {
   }
 
   const urlParts = req.url.split('/');
-  const sessionToken = urlParts[urlParts.length - 1];
+  const lastPart = urlParts[urlParts.length - 1];
+
+  // Strip query parameters from session token (e.g., ?encryptedKey=...)
+  const sessionToken = lastPart.split('?')[0];
 
   if (!sessionToken || sessionToken === 'ws') {
     console.error('❌ No session token provided in URL');
