@@ -133,7 +133,18 @@ wss.on('connection', async (ws, req) => {
       return;
     }
 
-    const settingsData = await settingsResponse.json();
+    const responseText = await settingsResponse.text();
+    console.log(`📄 Response length: ${responseText.length} bytes`);
+
+    let settingsData;
+    try {
+      settingsData = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error(`❌ JSON parse error:`, parseError.message);
+      console.error(`   Response text (first 200 chars):`, responseText.substring(0, 200));
+      ws.close(1008, 'Invalid settings response from API');
+      return;
+    }
 
     if (!settingsData.success || !settingsData.settings) {
       console.error(`❌ No settings found for session: ${sessionToken.substring(0, 8)}...`);
